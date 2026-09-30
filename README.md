@@ -62,7 +62,7 @@ R packages: 
 
 This repo does not include raw data (GTFS feeds and OSM extracts). To run the pipeline yourself:
 
-1. Set a Census API key as `CENSUS_API_KEY` in a local `.Renviron` file (not tracked).
+1. Set a Census API key as `CENSUS_API_KEY` and a CARTO basemap key as `CARTO_API_KEY` (free for non-commercial use: https://carto.com/basemaps/apikey) in a local `.Renviron` file (not tracked).
 2. Download the current MARTA GTFS feed and place the `.zip` in `data_raw/gtfs/`.
 3. Download a Georgia or Atlanta `.osm.pbf` extract (e.g., from Geofabrik) and place it in `data_raw/osm/`. A static extract is used here rather than live `osmdata` queries, for reproducibility and to avoid API timeouts on a long-running pipeline.
 4. Add a neighborhood/study-area boundary file (`.gpkg`, `.geojson`, or `.shp`) to `data_raw/boundaries/`.

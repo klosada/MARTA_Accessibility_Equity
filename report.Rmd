@@ -26,6 +26,22 @@ suppressPackageStartupMessages({
   library(scales)
 })
 source(here::here("scripts", "00_utils.R"))
+
+# CARTO basemaps require an API key (free for non-commercial use: https://carto.com/basemaps/apikey).
+# Set CARTO_API_KEY in .Renviron. Note the key ends up in the rendered HTML, as with any browser tile key.
+carto_api_key <- Sys.getenv("CARTO_API_KEY")
+if (!nzchar(carto_api_key)) {
+  stop("CARTO_API_KEY is not set. Request a key at https://carto.com/basemaps/apikey and add it to .Renviron.")
+}
+
+add_carto_tiles <- function(map, variant = "voyager_nolabels") {
+  addTiles(
+    map,
+    urlTemplate = glue("https://basemaps.cartocdn.com/rastertiles/{variant}/{{z}}/{{x}}/{{y}}{{r}}.png?key={carto_api_key}"),
+    attribution = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    options = tileOptions(maxZoom = 20)
+  )
+}
 ```
 
 ```{r optional-pipeline, eval=FALSE}
@@ -503,7 +519,7 @@ make_demographic_map <- function(sf_data, value_col, label, palette_colors) {
   pal <- colorNumeric(palette = palette_colors, domain = viz_data$metric_value, na.color = "#d9d9d9")
 
   leaflet(viz_data, options = leafletOptions(zoomControl = TRUE, minZoom = 9)) %>%
-    addProviderTiles(providers$CartoDB.VoyagerNoLabels) %>%
+    add_carto_tiles() %>%
     addPolygons(
       fillColor = ~pal(metric_value),
       fillOpacity = 0.84,
@@ -529,7 +545,7 @@ small_marker_css <- tags$style(HTML("
 "))
 
 reference_map <- leaflet(options = leafletOptions(minZoom = 9)) %>%
-  addProviderTiles(providers$CartoDB.VoyagerNoLabels) %>%
+  add_carto_tiles() %>%
   addPolygons(
     data = tracts_leaflet,
     color = "#9a8f80",
@@ -584,7 +600,7 @@ make_leaflet_map <- function(sf_data, value_col, palette_colors, label, popup_co
   }
 
   map_obj <- leaflet(viz_data, options = leafletOptions(zoomControl = TRUE, minZoom = 9)) %>%
-    addProviderTiles(providers$CartoDB.VoyagerNoLabels) %>%
+    add_carto_tiles() %>%
     addPolygons(
       fillColor = ~pal(metric_value),
       fillOpacity = 0.82,
@@ -623,7 +639,7 @@ make_leaflet_map <- function(sf_data, value_col, palette_colors, label, popup_co
 make_toggle_tt_map <- function(sf_data, rail_col, bus_col, title_prefix, palette_colors, bins, marker_mode = c("none", "circles")) {
   marker_mode <- match.arg(marker_mode)
   map_obj <- leaflet(options = leafletOptions(minZoom = 9)) %>%
-    addProviderTiles(providers$CartoDB.VoyagerNoLabels)
+    add_carto_tiles()
 
   shared_domain <- c(sf_data[[rail_col]], sf_data[[bus_col]])
   shared_pal <- colorBin(
@@ -685,7 +701,7 @@ make_toggle_tt_map <- function(sf_data, rail_col, bus_col, title_prefix, palette
 make_threshold_toggle_map <- function(sf_data, columns, scenario_label, palette_colors, bins, legend_labels, marker_mode = c("none", "circles")) {
   marker_mode <- match.arg(marker_mode)
   map_obj <- leaflet(options = leafletOptions(minZoom = 9)) %>%
-    addProviderTiles(providers$CartoDB.VoyagerNoLabels)
+    add_carto_tiles()
 
   layer_specs <- tibble(
     col = columns,
@@ -886,7 +902,7 @@ nearby_transit_legend_html <- make_component_legend_html(
 
 browsable(tagList(
   leaflet(options = leafletOptions(minZoom = 9)) %>%
-    addProviderTiles(providers$CartoDB.VoyagerNoLabels) %>%
+    add_carto_tiles() %>%
     addPolygons(
       data = tracts_leaflet %>% filter(GEOID == walk_example_geoid),
       fillColor = "#f4a261",
@@ -941,7 +957,7 @@ route_components_legend_html <- make_component_legend_html(
 
 browsable(tagList(
   leaflet(options = leafletOptions(minZoom = 10)) %>%
-    addProviderTiles(providers$CartoDB.VoyagerNoLabels) %>%
+    add_carto_tiles() %>%
     addPolygons(
       data = tracts_leaflet %>% filter(GEOID == buckhead_geoid),
       fillColor = "#f4a261",
