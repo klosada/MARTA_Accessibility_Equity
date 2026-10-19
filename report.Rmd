@@ -967,6 +967,28 @@ browsable(tagList(
 7. **Door-to-door time:** walk to stop + transit + walk from stop.
 8. **Metrics:** destinations reachable within 20, 30, and 45 min, and mean travel time.
 
+<details>
+<summary>Code excerpt: walking network (<code>scripts/03_prepare_walking_network.R</code>)</summary>
+
+```r
+walk_lines <- read_osm_layer("lines") %>%
+  # Retain only pedestrian-relevant road types, excluding highways and motorways.
+  filter(highway %in% c(
+    "footway", "path", "pedestrian", "living_street", "residential",
+    "service", "unclassified", "tertiary", "secondary", "primary"
+  )) %>%
+  st_transform(study_crs) %>%
+  st_intersection(tracts_acs %>% st_union() %>% st_buffer(3000)) %>%  # study area + 3 km
+  st_cast("LINESTRING", warn = FALSE)
+
+walk_net <- walk_lines %>%
+  sfnetworks::as_sfnetwork(directed = FALSE) %>%
+  activate(edges) %>%
+  mutate(weight = as.numeric(st_length(geometry)))  # segment length in meters
+```
+
+</details>
+
 Transit routing uses `tidytransit::raptor()`, an R implementation of the established RAPTOR algorithm that routes directly on GTFS timetables and transfers.
 
 <details>
@@ -1309,12 +1331,12 @@ subplot(income_box, minority_box, nrows = 1, margin = 0.05, shareY = TRUE) %>%
   )
 ```
 
-# Discussion
+## Key Findings
 
 - **Bus service gives roughly `r sprintf("%.1f", bus_n20 / rail_n20)`x rail-only access:** average destinations within 20 min rises from `r fmt2(rail_n20)` to `r fmt2(bus_n20)`, so a rail-only view understates access, especially outside rail corridors.
 - **Access is still limited:** even at 45 min, the average tract reaches `r fmt2(bus_n45)` of `r n_destinations` destinations (`r fmt2(bus_n30)` at 30 min).
 - **Equity pattern:** longer trips tend to fall on lower-income and higher-minority tracts, clearest for percent minority and weaker for zero-vehicle households.
-- **Real gap vs. data artifact:** Emory and Piedmont Atlanta Hospital lack nearby rail (real). Hartsfield's station is not georeferenced inside the airport tract, so airport rail access is understated, not absent.
+- **Real gap vs. data artifact:** Emory and Piedmont Atlanta Hospital lack nearby rail. Hartsfield's station is not georeferenced inside the airport tract, so airport rail access is understated, not absent.
 
 # Limitations
 
