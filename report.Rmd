@@ -990,7 +990,7 @@ raptor_res <- tidytransit::raptor(
 
 [Pipeline scripts](https://github.com/klosada/MARTA_Accessibility_Equity/tree/main/scripts) · [Code sample](https://github.com/klosada/MARTA_Accessibility_Equity/blob/main/scripts/code_sample.R)
 
-## Worked example
+## Routing Example
 
 ```{r walking-catchment-map}
 nearby_transit_legend_html <- make_component_legend_html(
