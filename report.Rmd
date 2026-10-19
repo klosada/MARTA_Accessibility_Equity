@@ -872,6 +872,7 @@ a:hover, a:focus { color: #9a4724; }
 .main-container pre code .hljs-string { color: #5f7a4a; }
 .main-container pre code .hljs-number { color: #7a5c99; }
 .main-container pre code .hljs-comment { color: #8a8174; font-style: italic; }
+details { margin-bottom: 28px; }
 details summary { cursor: pointer; color: var(--accent); }
 ```
 
@@ -972,19 +973,21 @@ browsable(tagList(
 
 ```r
 walk_lines <- read_osm_layer("lines") %>%
-  # Retain only pedestrian-relevant road types, excluding highways and motorways.
+  # Retain only pedestrian-relevant road types.
   filter(highway %in% c(
     "footway", "path", "pedestrian", "living_street", "residential",
     "service", "unclassified", "tertiary", "secondary", "primary"
   )) %>%
   st_transform(study_crs) %>%
-  st_intersection(tracts_acs %>% st_union() %>% st_buffer(3000)) %>%  # study area + 3 km
+  # Clip to the study area plus a 3 km buffer.
+  st_intersection(tracts_acs %>% st_union() %>% st_buffer(3000)) %>%
   st_cast("LINESTRING", warn = FALSE)
 
+# Build an undirected walk network weighted by segment length in meters.
 walk_net <- walk_lines %>%
   sfnetworks::as_sfnetwork(directed = FALSE) %>%
   activate(edges) %>%
-  mutate(weight = as.numeric(st_length(geometry)))  # segment length in meters
+  mutate(weight = as.numeric(st_length(geometry)))
 ```
 
 </details>
@@ -995,16 +998,21 @@ Transit routing uses `tidytransit::raptor()`, an R implementation of the establi
 <summary>Code excerpt: RAPTOR routing (<code>scripts/05_compute_accessibility.R</code>)</summary>
 
 ```r
+# Find the fastest scheduled trips from the stops within walking distance of a tract.
 raptor_res <- tidytransit::raptor(
-  stop_times    = stop_times_obj,
-  transfers     = attr(stop_times_obj, "transfers"),
-  stop_ids      = candidate_stops$stop_id,  # stops within walking distance
-  time_range    = peak_time_range,          # weekday morning peak
+  stop_times = stop_times_obj,
+  transfers = attr(stop_times_obj, "transfers"),
+  stop_ids = candidate_stops$stop_id,
+  time_range = peak_time_range,
   max_transfers = max_transfers,
-  keep          = "all"
+  keep = "all"
 ) %>%
-  left_join(candidate_stops %>% select(stop_id, walk_time_min),
-            by = c("from_stop_id" = "stop_id")) %>%
+  as_tibble() %>%
+  # Add the walk from the tract centroid to the boarding stop.
+  left_join(
+    candidate_stops %>% select(stop_id, walk_time_min),
+    by = c("from_stop_id" = "stop_id")
+  ) %>%
   mutate(total_time_min = seconds_to_minutes(travel_time) + walk_time_min)
 ```
 
