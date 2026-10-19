@@ -872,7 +872,8 @@ a:hover, a:focus { color: #9a4724; }
 .main-container pre code .hljs-string { color: #5f7a4a; }
 .main-container pre code .hljs-number { color: #7a5c99; }
 .main-container pre code .hljs-comment { color: #8a8174; font-style: italic; }
-details { margin-bottom: 28px; }
+details { margin-bottom: 6px; }
+details.spaced { margin-bottom: 28px; }
 details summary { cursor: pointer; color: var(--accent); }
 ```
 
@@ -968,7 +969,7 @@ browsable(tagList(
 7. **Door-to-door time:** walk to stop + transit + walk from stop.
 8. **Metrics:** destinations reachable within 20, 30, and 45 min, and mean travel time.
 
-<details>
+<details class="spaced">
 <summary>Code excerpt: walking network (<code>scripts/03_prepare_walking_network.R</code>)</summary>
 
 ```r
@@ -983,7 +984,6 @@ walk_lines <- read_osm_layer("lines") %>%
   st_intersection(tracts_acs %>% st_union() %>% st_buffer(3000)) %>%
   st_cast("LINESTRING", warn = FALSE)
 
-# Build an undirected walk network weighted by segment length in meters.
 walk_net <- walk_lines %>%
   sfnetworks::as_sfnetwork(directed = FALSE) %>%
   activate(edges) %>%
@@ -998,7 +998,6 @@ Transit routing uses `tidytransit::raptor()`, an R implementation of the establi
 <summary>Code excerpt: RAPTOR routing (<code>scripts/05_compute_accessibility.R</code>)</summary>
 
 ```r
-# Find the fastest scheduled trips from the stops within walking distance of a tract.
 raptor_res <- tidytransit::raptor(
   stop_times = stop_times_obj,
   transfers = attr(stop_times_obj, "transfers"),
