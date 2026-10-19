@@ -1,14 +1,13 @@
 ---
 title: "MARTA Accessibility and Equity Analysis"
-author: "Katherine Losada"
-date: "2025"
+author: "Katherine Losada · 2026 · [Source code on GitHub](https://github.com/klosada/MARTA_Accessibility_Equity)"
 knit: (function(inputFile, encoding) rmarkdown::render(inputFile, output_file = "index.html", encoding = encoding))
 output:
   html_document:
     theme: sandstone
     toc: true
     toc_float: true
-    number_sections: true
+    toc_depth: 2
     df_print: paged
 ---
 
@@ -812,36 +811,130 @@ plotly_theme <- list(
 )
 ```
 
-```{r echo=FALSE}
-htmltools::tags$p(
-  htmltools::tags$a(
-    href = "https://github.com/klosada/MARTA_Accessibility_Equity",
-    target = "_blank",
-    style = "color: #bfab8f; font-weight: 600; text-decoration: underline;",
-    "View source code on GitHub"
-  )
-)
+```{css, echo=FALSE}
+:root {
+  --accent: #bf5f36;
+  --accent-soft: #fde7d6;
+  --border-soft: #efd3bf;
+}
+a, a:visited { color: var(--accent); }
+a:hover, a:focus { color: #9a4724; }
+.callout {
+  background: var(--accent-soft);
+  border-left: 4px solid var(--accent);
+  border-radius: 4px;
+  padding: 12px 16px;
+  margin: 16px 0;
+}
+.callout p:last-child { margin-bottom: 0; }
+.stat-tiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 16px 0 24px;
+}
+.stat-tile {
+  flex: 1 1 200px;
+  background: var(--accent-soft);
+  border-radius: 6px;
+  padding: 12px 16px;
+}
+.stat-value { font-size: 1.8em; font-weight: 700; line-height: 1.2; }
+.stat-label { font-size: 0.9em; }
+.section > table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0 20px;
+}
+.section > table th {
+  background: var(--accent-soft);
+  text-align: left;
+}
+.section > table th,
+.section > table td {
+  border: 1px solid var(--border-soft);
+  padding: 8px 10px;
+  vertical-align: top;
+}
+.section > table td ul { margin: 0; padding-left: 18px; }
+.main-container pre,
+.main-container pre code {
+  background: #fbf8f4;
+  color: #3e3f3a;
+}
+.main-container pre {
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+}
+/* highlight.js token colors, replacing the default grey/red theme */
+.main-container pre code .hljs-keyword,
+.main-container pre code .hljs-literal { color: #9a4724; font-weight: normal; }
+.main-container pre code .hljs-string { color: #5f7a4a; }
+.main-container pre code .hljs-number { color: #7a5c99; }
+.main-container pre code .hljs-comment { color: #8a8174; font-style: italic; }
+details summary { cursor: pointer; color: var(--accent); }
 ```
 
-# Introduction
+```{js, echo=FALSE}
+// Open external links (including ones added later by map widgets) in a new tab.
+document.addEventListener("click", function (event) {
+  var link = event.target.closest('a[href^="http"]');
+  if (link) {
+    link.target = "_blank";
+    link.rel = "noopener";
+  }
+});
+```
 
-This analysis examines **public transit accessibility and equity** across **Atlanta** using the **MARTA** system. It compares tract-level accessibility under **two scenarios**: **rail only** and the full MARTA network of **bus plus rail**.
+```{r overview-stats}
+reach_value <- function(scenario_name, threshold) {
+  summary_reachability %>% filter(scenario == scenario_name) %>% pull(all_of(threshold))
+}
+rail_n20 <- reach_value("Rail only", "<= 20 min")
+bus_n20 <- reach_value("Bus + rail", "<= 20 min")
+bus_n30 <- reach_value("Bus + rail", "<= 30 min")
+bus_n45 <- reach_value("Bus + rail", "<= 45 min")
+n_destinations <- nrow(destinations)
+n_tracts <- nrow(tracts_final)
+fmt2 <- function(x) sprintf("%.2f", x)
 
-The analysis focuses on **access to key destinations**, including major **job centers, universities, hospitals**, and the **airport**. Accessibility is measured by how many of these destinations can be reached from each census tract within a set of **travel-time thresholds**, showing how access varies across neighborhoods.
+dest_type_labels <- c(job_center = "Job centers", education = "Universities", hospital = "Hospitals", airport = "Airport")
+destination_list_html <- destinations %>%
+  st_drop_geometry() %>%
+  group_by(dest_type) %>%
+  summarise(names = paste(dest_name, collapse = ", "), .groups = "drop") %>%
+  mutate(dest_type = factor(dest_type, levels = names(dest_type_labels))) %>%
+  arrange(dest_type) %>%
+  glue_data("<li>{dest_type_labels[as.character(dest_type)]}: {names}</li>") %>%
+  paste(collapse = "")
+```
 
-It also considers whether differences in transit accessibility align with **socioeconomic need**, with particular attention to **median household income, percent minority, and percent zero-vehicle households**.
+# Overview
 
-# Data and Study Area
+::: {.callout}
+**Goal:** Measure how well MARTA's multimodal transit network connects Atlanta census tracts to `r n_destinations` key points of interest (job centers, universities, hospitals, and the airport), and whether access gaps fall on higher-need neighborhoods.
 
-This analysis uses four main data sources:
+**Approach:** Compare scheduled weekday-morning-peak travel times from each of `r n_tracts` tracts under two scenarios, rail only and bus + rail. Relate the results to median household income, percent minority, and percent zero-vehicle households.
+:::
 
-**Census tract boundaries and American Community Survey (ACS) attributes:** Census tracts provide the main geographic unit for the analysis and align with socioeconomic data used for the equity component. ACS variables include median household income, percent minority, and percent zero-vehicle households.
+<div class="stat-tiles">
+<div class="stat-tile"><div class="stat-value">`r fmt2(rail_n20)` → `r fmt2(bus_n20)`</div><div class="stat-label">Average destinations reachable within 20 min, rail only → bus + rail</div></div>
+<div class="stat-tile"><div class="stat-value">`r fmt2(bus_n45)` of `r n_destinations`</div><div class="stat-label">Average destinations reachable within 45 min, bus + rail</div></div>
+</div>
 
-**MARTA GTFS data:** GTFS data provides geospatial features of the MARTA transit network, including rail lines, bus routes, stations, and stops, in addition to service schedules.
+# Data and Tools
 
-**OpenStreetMap walking network:** OpenStreetMap data provide the pedestrian network used to represent walk connections to transit, including streets and paths relevant to pedestrian travel.
+<table class="data-table">
+<thead><tr><th>Source</th><th>What it provides</th><th>Used for</th></tr></thead>
+<tbody>
+<tr><td><strong>Census and ACS</strong><br>(`r acs_year` 5-year)</td><td><ul><li>Tract boundaries (`r n_tracts` tracts inside City of Atlanta neighborhoods)</li><li>Median household income, percent minority, percent zero-vehicle households</li></ul></td><td>Analysis geography and equity indicators</td></tr>
+<tr><td><strong>MARTA GTFS</strong></td><td><ul><li>Rail lines, bus routes, stations, stops</li><li>Weekday schedules</li></ul></td><td>Transit network and scheduled travel times</td></tr>
+<tr><td><strong>OpenStreetMap</strong></td><td><ul><li>Walkable streets and paths</li></ul></td><td>Walk legs to and from transit</td></tr>
+<tr><td><strong>Destination layer</strong></td><td><ul>`r destination_list_html`</ul></td><td>Destinations whose access is measured</td></tr>
+</tbody>
+</table>
 
-**Destination point layer:** A manually created destination layer identifies selected policy-relevant locations used to represent key access needs across the city, including job centers, universities, hospitals, and the airport.
+**Tools:** R (tidyverse, sf, sfnetworks, tidytransit, tidycensus, leaflet, plotly, scales)
 
 ```{r map-reference}
 browsable(tagList(
@@ -865,27 +958,39 @@ browsable(tagList(
 
 # Methods
 
-## Tools and packages
+1. **Clip to study area:** OSM streets and paths are clipped to the study tracts plus a 3 km buffer, so walks near the city edge are not cut off.
+2. **Process walk network:** keep pedestrian-relevant types (footways, paths, residential and local streets, primary to tertiary roads), remove motorways and trunk roads, and build a routable network with `sfnetworks` weighted by segment length.
+3. **Origins:** one centroid per tract.
+4. **Walk links:** shortest path on the walk network from each centroid to stops within 800 m (0.5 mi, about 10 min). Destinations link to their nearby stops the same way.
+5. **Transit schedules:** GTFS service limited to the weekday morning peak (7–10 AM), split into rail only and bus + rail.
+6. **Transit routing:** fastest scheduled trip from each tract's linked stops to each destination's stops, with up to 3 transfers.
+7. **Door-to-door time:** walk to stop + transit + walk from stop.
+8. **Metrics:** destinations reachable within 20, 30, and 45 min, and mean travel time.
 
-This analysis was completed in **R** using packages for data wrangling, spatial analysis, transit routing, mapping, and visualization. Key packages include `tidyverse`, `sf`, `sfnetworks`, `leaflet`, `plotly`, and `scales`.
+Transit routing uses `tidytransit::raptor()`, an R implementation of the established RAPTOR algorithm that routes directly on GTFS timetables and transfers.
 
-## Data preparation
+<details>
+<summary>Code excerpt: RAPTOR routing (<code>scripts/05_compute_accessibility.R</code>)</summary>
 
-Census tracts were used as the main analysis geography. Each tract was represented by a **single internal origin point (centroid)** to provide a consistent starting location for tract-level accessibility analysis.
+```r
+raptor_res <- tidytransit::raptor(
+  stop_times    = stop_times_obj,
+  transfers     = attr(stop_times_obj, "transfers"),
+  stop_ids      = candidate_stops$stop_id,  # stops within walking distance
+  time_range    = peak_time_range,          # weekday morning peak
+  max_transfers = max_transfers,
+  keep          = "all"
+) %>%
+  left_join(candidate_stops %>% select(stop_id, walk_time_min),
+            by = c("from_stop_id" = "stop_id")) %>%
+  mutate(total_time_min = seconds_to_minutes(travel_time) + walk_time_min)
+```
 
-MARTA GTFS data was selected to represent **scheduled service during a weekday morning peak period**. Two transit scenarios were evaluated: rail only and the full MARTA network of bus plus rail.
+</details>
 
-The OpenStreetMap network was **filtered to retain pedestrian-relevant streets and paths** while excluding highways and other non-walkable roads. This walking network was used to estimate access from tract origins to nearby transit stops and stations.                                                                                                                      
+[Pipeline scripts](https://github.com/klosada/MARTA_Accessibility_Equity/tree/main/scripts) · [Code sample](https://github.com/klosada/MARTA_Accessibility_Equity/blob/main/scripts/code_sample.R)
 
-## Accessibility and equity approach
-
-Accessibility was evaluated by estimating the **fastest scheduled trip from each census tract to each destination** under two scenarios: rail only and the full MARTA network of bus plus rail. Travelers were assumed to access transit by walking up to **0.5 miles (800 meters)**, used here as a reasonable **approximation of a 10-minute walk**.
-
-Destination-level travel times were then summarized into **tract-level accessibility measures**. The main indicators are the numbers of **destinations reachable within 20, 30, and 45 minutes**, showing accessibility within practical travel times and where longer trips are required. **Mean travel time** across all selected destinations is also used to **summarize the overall transit burden** faced by residents in each tract. **The equity analysis relates** these **accessibility patterns** to tract-level **socioeconomic need**.
-
-## Workflow example
-
-The workflow maps below illustrate how tract origins were linked to nearby transit using realistic walking estimates. The second map shows an example of the shortest rail route from a tract origin to a selected destination.
+## Worked example
 
 ```{r walking-catchment-map}
 nearby_transit_legend_html <- make_component_legend_html(
@@ -1027,13 +1132,11 @@ browsable(tagList(
 ))
 ```
 
-# Accessibility Results
+# Results
 
-**Cumulative accessibility** is the main focus of this analysis. The **bus + rail** map below shows how many key destinations are reachable within **20, 30, and 45 minutes**. Because every **rail-only** trip completes within **20 minutes**, the rail-only map is shown at a single **20-minute** threshold, which already captures all rail-reachable destinations. An additional **difference map** highlights where bus service expands access beyond the rail network alone.
+## Accessibility
 
-**Midtown** is included as a **sample job-center destination** to illustrate how transit travel times vary across the city under each scenario.                                                        
-
-The **table** below **summarizes** the **average number of destinations reachable** across census tracts under each scenario.
+Destinations reachable from each tract, averaged across tracts. Click any tract for values.
 
 ```{r reachability-summary}
 summary_reachability %>%
@@ -1047,6 +1150,8 @@ summary_reachability %>%
     align = c("l", "r", "r", "r")
   )
 ```
+
+Every rail-only trip completes within 20 min, so one threshold covers all rail-reachable destinations.
 
 ```{r threshold-maps}
 tagList(
@@ -1103,9 +1208,9 @@ make_toggle_tt_map(
 )
 ```
 
-# Equity Results
+## Equity
 
-This analysis places the accessibility results in demographic context. The maps show how **income, minority share, and zero-vehicle households** are distributed across Atlanta, while the plots examine whether **lower accessibility** and **longer travel times** are concentrated in **higher-need areas**.
+Do longer trips concentrate in higher-need tracts? Distribution of need first, then travel time against it.
 
 ```{r map-demographics}
 income_map <- make_demographic_map(tracts_leaflet, "hhinc", "Median household income", demographic_specs[[1]]$palette)
@@ -1206,13 +1311,10 @@ subplot(income_box, minority_box, nrows = 1, margin = 0.05, shareY = TRUE) %>%
 
 # Discussion
 
-This analysis shows that a multimodal view of transit accessibility provides a more complete picture of how MARTA connects people to key destinations across Atlanta. While it is expected that including bus service would expand the network beyond rail alone, the results show the scale of that difference: on average, the **number of destinations reachable** from each tract **increased from 1.36 to 3.30 within 20 minutes** when the **full bus-and-rail network** was considered.
-
-These results suggest that evaluating MARTA through a **rail-only** lens can substantially **understate accessibility**, particularly in areas outside the immediate rail corridors. A **multimodal accessibility** approach **better reflects how the system operates** in practice, where bus connections often extend the reach of the fixed-rail network and improve access to jobs, education, health care, and the airport. Part of the rail-only gap is genuine: **Emory** and **Piedmont Atlanta Hospital** are **not served by nearby MARTA rail**. The **airport** case is instead a **data artifact** — Hartsfield is served by rail, but its MARTA station is not georeferenced within the airport's census tract or boundary, so rail access there is **understated rather than absent**.
-
-The equity analysis adds an important dimension to these results. The **plotted relationships** suggest that mean travel times were not distributed evenly across Atlanta: tracts with **lower median household incomes** generally appear to have **longer travel times**, while tracts with **higher minority shares** and **higher shares of zero-vehicle households** also tend to **face longer trips**. The association is most visible for percent minority, while the pattern for percent zero-vehicle households appears weaker. 
-
-Together, these results suggest that **transit accessibility** is **not only** a question of **network coverage**, but also **one of equity** in access to essential destinations.
+- **Bus service gives roughly `r sprintf("%.1f", bus_n20 / rail_n20)`x rail-only access:** average destinations within 20 min rises from `r fmt2(rail_n20)` to `r fmt2(bus_n20)`, so a rail-only view understates access, especially outside rail corridors.
+- **Access is still limited:** even at 45 min, the average tract reaches `r fmt2(bus_n45)` of `r n_destinations` destinations (`r fmt2(bus_n30)` at 30 min).
+- **Equity pattern:** longer trips tend to fall on lower-income and higher-minority tracts, clearest for percent minority and weaker for zero-vehicle households.
+- **Real gap vs. data artifact:** Emory and Piedmont Atlanta Hospital lack nearby rail (real). Hartsfield's station is not georeferenced inside the airport tract, so airport rail access is understated, not absent.
 
 # Limitations
 
