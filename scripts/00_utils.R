@@ -33,7 +33,7 @@ weekday_index <- function(x) {
   )[[tolower(x)]]
 }
 
-# Selects a representative Wednesday from the GTFS feed with no service exceptions.
+# Selects a representative weekday from the GTFS feed with no service exceptions.
 choose_gtfs_analysis_date <- function(gtfs, target_weekday = analysis_weekday) {
   if (!"calendar" %in% names(gtfs)) {
     stop("GTFS feed must include a calendar table.")

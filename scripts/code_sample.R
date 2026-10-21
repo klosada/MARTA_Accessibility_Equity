@@ -2,22 +2,17 @@
 # MARTA Accessibility and Equity Analysis
 # Code sample - Katherine Losada
 #
-# This file is an excerpt from a larger R pipeline (9 scripts, orchestrated by 99_run_all.R)
-# that downloads ACS, GTFS, and OpenStreetMap data, builds a pedestrian network, computes 
-# multimodal transit accessibility for every census tract in Atlanta, and summarizes 
-# results for an equity analysis. 
+# Measures how well MARTA rail only vs. bus + rail connects Atlanta census tracts
+# to 7 key destinations (job centers, universities, hospitals, airport) during the
+# weekday morning peak, and whether access gaps fall on higher-need neighborhoods.
 #
-# Full Code (GitHub repository): https://github.com/klosada/MARTA_Accessibility_Equity 
-# Project Report (maps and figures): https://klosada.github.io/MARTA_Accessibility_Equity
+# Full code: https://github.com/klosada/MARTA_Accessibility_Equity
+# Report: https://klosada.github.io/MARTA_Accessibility_Equity
 #
-# This excerpt includes the main analytical approach:
-#
-#   1. Two helper functions (from 00_utils.R) that the accessibility script below depends on.
-#   2. The core transit-routing engine from 05_compute_accessibility.R.
-#   3. Aggregation into tract-level metrics from 6_summarize_metrics.R.
-#
-# Scripts 01-04 (not included here) prepare the census, GTFS, walking-network, and destination inputs.
-# Scripts 07-08 generate the maps and plots shown in the accompanying report.
+# Excerpt from a 9-script R pipeline run by 99_run_all.R (01-04 prepare inputs):
+#   1. 00_utils.R helpers: choose_gtfs_analysis_date(), compute_network_links()
+#   2. 05_compute_accessibility.R: walk links and tidytransit::raptor() routing
+#   3. 06_summarize_metrics.R: destinations within 20/30/45 min, travel time stats
 # ============================================================
 
 
@@ -134,13 +129,13 @@ partial_path <- here::here("data_processed", "travel_times_long_partial.rds")
 # Computes walk time from each POI, policy-relevant destination, to its nearest transit stops, 
 # providing the final walking segment needed for full travel time estimates.
 build_destination_lookup <- function(destinations_sf, stops_sf, scenario_name) {
-  lookup <- compute_network_links(
+  compute_network_links(
     network = walk_net,
     from_sf = destinations_sf,
     to_sf = stops_sf,
     from_cols = c("dest_id", "dest_name", "dest_type"),
     to_cols = c("stop_id", "stop_name"),
-    max_dist = dest_walk_meters
+    max_dist = max_walk_meters
   ) %>%
     transmute(
       dest_id,
@@ -151,12 +146,6 @@ build_destination_lookup <- function(destinations_sf, stops_sf, scenario_name) {
       dest_stop_name = stop_name,
       dest_walk_time_min = walk_time_min
     )
-
-  if (!nrow(lookup)) {
-    stop(glue("No destination stops found for scenario '{scenario_name}'. Increase dest_walk_meters or inspect stop coverage."))
-  }
-
-  lookup
 }
 
 message("Building destination-stop lookup...")
@@ -281,7 +270,6 @@ for (i in seq.int(start_index, length(origins$GEOID))) {
   if (i %% 25 == 0 || i == length(origins$GEOID)) {
     partial_tbl <- bind_rows(results_list[seq_len(i)])
     save_rds(partial_tbl, partial_path)
-    readr::write_csv(partial_tbl, here::here("outputs", "tables", "travel_times_long_partial.csv"))
     message(glue("Completed {i} of {length(origins$GEOID)} tracts."))
   }
 }
@@ -307,9 +295,9 @@ accessibility_summary <- travel_times_long %>%
     mean_tt = mean(travel_time_min, na.rm = TRUE),
     min_tt = min(travel_time_min, na.rm = TRUE),
     max_tt = max(travel_time_min, na.rm = TRUE),
+    n_20 = sum(travel_time_min <= 20, na.rm = TRUE),
     n_30 = sum(travel_time_min <= 30, na.rm = TRUE),
     n_45 = sum(travel_time_min <= 45, na.rm = TRUE),
-    n_60 = sum(travel_time_min <= 60, na.rm = TRUE),
     .groups = "drop"
   ) %>%
   mutate(across(c(mean_tt, min_tt, max_tt), ~ if_else(is.infinite(.x), NA_real_, .x)))
@@ -328,16 +316,16 @@ travel_time_wide <- travel_times_long %>%
 summary_wide <- accessibility_summary %>%
   tidyr::pivot_wider(
     names_from = scenario,
-    values_from = c(mean_tt, min_tt, max_tt, n_30, n_45, n_60),
+    values_from = c(mean_tt, min_tt, max_tt, n_20, n_30, n_45),
     names_glue = "{scenario}_{.value}"
   ) %>%
   mutate(
-    diff_n_45 = bus_rail_n_45 - rail_only_n_45,
+    diff_n_20 = bus_rail_n_20 - rail_only_n_20,
     diff_mean_tt = rail_only_mean_tt - bus_rail_mean_tt
   )
 
 # Joins accessibility metrics back onto tract geometry and ACS demographics, 
-# making outpura ready for the equity maps/plots and final report.
+# making outputs ready for the equity maps/plots and final report.
 tracts_final <- tracts_acs %>%
   left_join(summary_wide, by = "GEOID") %>%
   left_join(travel_time_wide, by = "GEOID")

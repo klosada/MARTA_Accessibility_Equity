@@ -40,7 +40,7 @@ summary_wide <- accessibility_summary %>%
     names_glue = "{scenario}_{.value}"
   ) %>%
   mutate(
-    diff_n_45 = bus_rail_n_45 - rail_only_n_45,
+    diff_n_20 = bus_rail_n_20 - rail_only_n_20,
     diff_mean_tt = rail_only_mean_tt - bus_rail_mean_tt
   )
 

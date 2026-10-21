@@ -308,18 +308,14 @@ summary_stats <- accessibility_summary %>%
 travel_long_viz <- travel_times_long %>%
   left_join(tracts_final %>% st_drop_geometry() %>% select(GEOID, hhinc, pct_minority, pct_zero_vehicle), by = "GEOID")
 
-# Counts of destinations reachable within 20/30/45 min are produced upstream by
-# 06_summarize_metrics.R and carried on tracts_final. Here we only fill any missing
-# counts with 0 and derive the bus-vs-rail difference columns used by the maps.
+# Counts of destinations reachable within 20/30/45 min and
+# the 20-min bus-vs-rail difference are produced upstream by 06_summarize_metrics.R
 tracts_leaflet <- tracts_leaflet %>%
   mutate(
     across(
-      c(rail_only_n_20, bus_rail_n_20, rail_only_n_30, bus_rail_n_30, rail_only_n_45, bus_rail_n_45),
+      c(rail_only_n_20, bus_rail_n_20, rail_only_n_30, bus_rail_n_30, rail_only_n_45, bus_rail_n_45, diff_n_20),
       ~replace_na(., 0)
-    ),
-    diff_n_20 = bus_rail_n_20 - rail_only_n_20,
-    diff_n_30 = bus_rail_n_30 - rail_only_n_30,
-    diff_n_45 = bus_rail_n_45 - rail_only_n_45
+    )
   )
 
 summary_reachability <- tracts_leaflet %>%

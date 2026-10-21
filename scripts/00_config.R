@@ -11,7 +11,6 @@ suppressPackageStartupMessages({
   library(sfnetworks)
   library(tidygraph)
   library(units)
-  library(tmap)
   library(leaflet)
   library(here)
   library(glue)
@@ -25,9 +24,7 @@ study_county_names <- c("Clayton", "DeKalb", "Fulton")
 
 # Walking speed and maximum distance assumptions for transit access.
 walk_speed_m_per_min <- 80
-max_walk_minutes <- 10
-max_walk_meters <- walk_speed_m_per_min * max_walk_minutes
-dest_walk_meters <- 800
+max_walk_meters <- 800  # roughly 0.5 mile
 
 # Weekday peak morning commute for a representative transit service period.
 analysis_weekday <- "wednesday"
@@ -66,7 +63,5 @@ dirs <- list(
   raw_osm = here::here("data_raw", "osm"),
   raw_destinations = here::here("data_raw", "destinations"),
   processed = here::here("data_processed"),
-  tables = here::here("outputs", "tables"),
-  figures = here::here("outputs", "figures"),
-  maps = here::here("outputs", "maps")
+  tables = here::here("outputs", "tables")
 )

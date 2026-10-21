@@ -40,7 +40,7 @@ build_destination_lookup <- function(destinations_sf, stops_sf, scenario_name) {
     to_sf = stops_sf,
     from_cols = c("dest_id", "dest_name", "dest_type"),
     to_cols = c("stop_id", "stop_name"),
-    max_dist = dest_walk_meters
+    max_dist = max_walk_meters
   ) %>%
     transmute(
       dest_id,
@@ -53,7 +53,7 @@ build_destination_lookup <- function(destinations_sf, stops_sf, scenario_name) {
     )
 
   if (!nrow(lookup)) {
-    stop(glue("No destination stops found for scenario '{scenario_name}'. Increase dest_walk_meters or inspect stop coverage."))
+    stop(glue("No destination stops found for scenario '{scenario_name}'. Increase max_walk_meters or inspect stop coverage."))
   }
 
   lookup
@@ -165,7 +165,6 @@ for (i in seq.int(start_index, length(origins$GEOID))) {
   if (i %% 25 == 0 || i == length(origins$GEOID)) {
     partial_tbl <- bind_rows(results_list[seq_len(i)])
     save_rds(partial_tbl, partial_path)
-    readr::write_csv(partial_tbl, here::here("outputs", "tables", "travel_times_long_partial.csv"))
     message(glue("Completed {i} of {length(origins$GEOID)} tracts."))
   }
 }

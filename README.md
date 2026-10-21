@@ -17,7 +17,7 @@ Accessibility is measured as the number of destinations reachable from each cens
 
 | Source | Used for |
 |---|---|
-| Census/ACS (via `tidycensus`) | Tract boundaries and socioeconomic variables (income, minority share, zero-vehicle households) |
+| Census/ACS 2023 5-year (via `tidycensus`) | Tract boundaries and socioeconomic variables (income, minority share, zero-vehicle households) |
 | MARTA GTFS feed | Transit network: rail lines, bus routes, stations, stops, and weekday schedules |
 | OpenStreetMap (`.osm.pbf` extract) | Pedestrian network for walk access to/from transit |
 | Manually defined destination layer | 7 policy-relevant destinations (job centers, universities, hospitals, airport) |
@@ -26,36 +26,37 @@ Accessibility is measured as the number of destinations reachable from each cens
 
 1. Each census tract is represented by a single centroid as its origin point.
 2. The OSM walking network is filtered to pedestrian-relevant ways and built into a routable network (`sfnetworks`).
-3. Walk-accessible transit stops are identified for each origin and destination within a fixed walking distance.
-4. Scheduled transit travel times are computed using RAPTOR-based routing (`tidytransit::raptor()`) for both scenarios.
+3. Walk-accessible transit stops are identified for each origin and destination within 800 m (roughly 0.5 mile).
+4. Scheduled transit travel times are computed using RAPTOR-based routing (`tidytransit::raptor()`) for both scenarios, weekday 7–10 AM, up to 3 transfers.
 5. Door-to-door travel time = walk access + transit travel time + walk egress.
 6. Results are summarized into tract-level accessibility metrics and joined to ACS demographics for the equity analysis.
 
 ## Tech Stack
 
 R packages: 
-`tidyverse`, `sf`, `sfnetworks` (network routing), `tidytransit` (GTFS transit routing), `tidycensus` (Census/ACS data),`  tmap`, `leaflet`,  `plotly `(mapping and visualization).
+`tidyverse`, `sf`, `sfnetworks` (network routing), `tidytransit` (GTFS transit routing), `tidycensus` (Census/ACS data), `leaflet`, `plotly` (mapping and visualization).
 
 ## Project Structure
 
 ```
 .
 ├── scripts/
-│   ├── 00_config.R                 # study parameters, packages, destinations
-│   ├── 00_utils.R                  # shared helper functions
-│   ├── 01_download_census.R        # ACS tract data
-│   ├── 02_prepare_gtfs.R           # GTFS feed prep (rail-only vs bus+rail)
-│   ├── 03_prepare_walking_network.R# OSM walking network
-│   ├── 04_prepare_destinations.R   # destination point layer
-│   ├── 05_compute_accessibility.R  # core transit-routing engine
-│   ├── 06_summarize_metrics.R      # tract-level accessibility metrics
-│   ├── 07_make_maps.R              # interactive maps
-│   ├── 08_make_plots.R             # equity scatterplots/boxplots
-│   └── 99_run_all.R                # runs the full pipeline in order
-├── report.Rmd                      # final report (renders to index.html)
-├── data_raw/                       # not tracked 
-├── data_processed/                 # intermediate outputs (.rds, .gpkg)
-└── outputs/                        # final tables, figures, and maps
+│   ├── 00_config.R                  # study parameters, packages, destinations
+│   ├── 00_utils.R                   # shared helper functions
+│   ├── 01_download_census.R         # ACS tract data
+│   ├── 02_prepare_gtfs.R            # GTFS feed prep (rail-only vs bus+rail)
+│   ├── 03_prepare_walking_network.R # OSM walking network
+│   ├── 04_prepare_destinations.R    # destination point layer
+│   ├── 05_compute_accessibility.R   # core transit-routing engine
+│   ├── 06_summarize_metrics.R       # tract-level accessibility metrics
+│   ├── 99_run_all.R                 # runs the full pipeline in order
+│   ├── code_sample.R                # condensed excerpt of the core pipeline
+│   └── watch_report.R               # dev tool: re-renders report.Rmd on save
+├── report.Rmd                       # report with interactive maps and plots
+├── index.html                       # rendered report (GitHub Pages)
+├── data_raw/                        # not tracked
+├── data_processed/                  # not tracked, intermediate outputs (.rds, .gpkg)
+└── outputs/tables/                  # summary and travel time tables (.csv)
 ```
 
 ## Setup
