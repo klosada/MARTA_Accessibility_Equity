@@ -1265,11 +1265,11 @@ browsable(tagList(
       fillColor = map_colors$tract_fill,
       fillOpacity = 0.10,
       color = map_colors$tract,
-      weight = 3.5,
+      weight = 2.5,
       opacity = 0.75,
       popup = ~glue("<strong>Example tract:</strong> {NAME}<br/><strong>GEOID:</strong> {GEOID}")
     ) %>%
-    addPolygons(data = walk_threshold_ring, fill = FALSE, color = "#8c8c8c", weight = 3, opacity = 0.75, dashArray = "6,7") %>%
+    addPolygons(data = walk_threshold_ring, fill = FALSE, color = "#8c8c8c", weight = 2.5, opacity = 0.75, dashArray = "6,7") %>%
     addPolylines(data = service_paths, color = map_colors$walk, weight = 1.5, opacity = 0.9) %>%
     addCircleMarkers(
       data = st_transform(walk_example_origin, 4326),
