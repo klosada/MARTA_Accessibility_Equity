@@ -1247,7 +1247,7 @@ service_area_legend_html <- make_component_legend_html(
   tibble::tribble(
     ~type, ~color, ~label,
     "line", map_colors$tract, "Census tract boundary",
-    "dash", map_colors$context, "800 m straight-line radius",
+    "dash", "#8c8c8c", "800 m straight-line radius",
     "line", map_colors$walk, "Walking paths within 800 m",
     "point", map_colors$centroid, "Population-weighted centroid",
     "point", map_colors$rail_stop, "Rail station within an 800 m walk",
@@ -1265,10 +1265,11 @@ browsable(tagList(
       fillColor = map_colors$tract_fill,
       fillOpacity = 0.10,
       color = map_colors$tract,
-      weight = 2,
+      weight = 3.5,
+      opacity = 1,
       popup = ~glue("<strong>Example tract:</strong> {NAME}<br/><strong>GEOID:</strong> {GEOID}")
     ) %>%
-    addPolygons(data = walk_threshold_ring, fill = FALSE, color = map_colors$context, weight = 2, dashArray = "5,6") %>%
+    addPolygons(data = walk_threshold_ring, fill = FALSE, color = "#8c8c8c", weight = 3, opacity = 1, dashArray = "6,7") %>%
     addPolylines(data = service_paths, color = map_colors$walk, weight = 1.5, opacity = 0.9) %>%
     addCircleMarkers(
       data = st_transform(walk_example_origin, 4326),
