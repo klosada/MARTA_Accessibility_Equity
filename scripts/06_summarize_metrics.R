@@ -1,28 +1,37 @@
 source(here::here("scripts", "00_utils.R"))
 ensure_directories()
 
-# Overview: Aggregates raw travel times into tract-level accessibility metrics
-# and joins results to ACS demographic data for the equity analysis.
+# Summarizes travel times into tract-level metrics and joins ACS demographics.
 
-tracts_acs <- readRDS(here::here("data_processed", "tracts_acs.rds"))
-travel_times_long <- readRDS(here::here("data_processed", "travel_times_long.rds"))
+# Excludes tracts with no residents (airport, golf course) from the analysis.
+tracts_acs <- readRDS(here::here("data_processed", "tracts_acs.rds")) %>%
+  filter(total_pop > 0)
+travel_times_long <- readRDS(here::here("data_processed", "travel_times_long.rds")) %>%
+  filter(GEOID %in% tracts_acs$GEOID)
 
-# Per-tract accessibility metrics: mean, min, max travel times and
-# counts of destinations reachable within 20, 30, and 45 minutes.
+# Per tract and scenario: min/median/mean/max travel time to reachable destinations,
+# destinations reachable within 15-90 min, and wait cost (median minus best-departure
+# travel time, averaged across destinations).
 accessibility_summary <- travel_times_long %>%
   group_by(GEOID, scenario) %>%
   summarise(
+    min_tt = suppressWarnings(min(travel_time_min, na.rm = TRUE)),
+    median_tt = median(travel_time_min, na.rm = TRUE),
     mean_tt = mean(travel_time_min, na.rm = TRUE),
-    min_tt = min(travel_time_min, na.rm = TRUE),
-    max_tt = max(travel_time_min, na.rm = TRUE),
-    n_20 = sum(travel_time_min <= 20, na.rm = TRUE),
+    max_tt = suppressWarnings(max(travel_time_min, na.rm = TRUE)),
+    n_reachable = sum(reachable),
+    wait_cost = mean(travel_time_min - best_time_min, na.rm = TRUE),
+    n_15 = sum(travel_time_min <= 15, na.rm = TRUE),
     n_30 = sum(travel_time_min <= 30, na.rm = TRUE),
     n_45 = sum(travel_time_min <= 45, na.rm = TRUE),
+    n_60 = sum(travel_time_min <= 60, na.rm = TRUE),
+    n_75 = sum(travel_time_min <= 75, na.rm = TRUE),
+    n_90 = sum(travel_time_min <= 90, na.rm = TRUE),
     .groups = "drop"
   ) %>%
-  mutate(across(c(mean_tt, min_tt, max_tt), ~ if_else(is.infinite(.x), NA_real_, .x)))
+  mutate(across(c(min_tt, median_tt, mean_tt, max_tt, wait_cost), ~ if_else(is.infinite(.x) | is.nan(.x), NA_real_, .x)))
 
-# Reshapes travel times to wide format by destination for mapping and visualization.
+# Travel time to each destination, for destination maps.
 travel_time_wide <- travel_times_long %>%
   select(GEOID, scenario, dest_name, travel_time_min) %>%
   mutate(dest_name = stringr::str_replace_all(tolower(dest_name), "[^a-z0-9]+", "_")) %>%
@@ -32,24 +41,21 @@ travel_time_wide <- travel_times_long %>%
     names_glue = "{scenario}_{dest_name}_tt"
   )
 
-# Reshapes summary to wide format and calculates bus vs. rail difference metrics.
+# One row per tract, with the rail-only vs. multimodal difference at 45 min.
 summary_wide <- accessibility_summary %>%
   tidyr::pivot_wider(
     names_from = scenario,
-    values_from = c(mean_tt, min_tt, max_tt, n_20, n_30, n_45),
+    values_from = c(min_tt, median_tt, mean_tt, max_tt, n_reachable, wait_cost, n_15, n_30, n_45, n_60, n_75, n_90),
     names_glue = "{scenario}_{.value}"
   ) %>%
   mutate(
-    diff_n_20 = bus_rail_n_20 - rail_only_n_20,
-    diff_mean_tt = rail_only_mean_tt - bus_rail_mean_tt
+    diff_n_45 = bus_rail_n_45 - rail_only_n_45
   )
 
-# Joins accessibility metrics and ACS demographics for equity mapping and analysis.
 tracts_final <- tracts_acs %>%
   left_join(summary_wide, by = "GEOID") %>%
   left_join(travel_time_wide, by = "GEOID")
 
 save_rds(accessibility_summary, here::here("data_processed", "accessibility_summary.rds"))
 save_rds(tracts_final, here::here("data_processed", "tracts_final.rds"))
-write_gpkg(tracts_final, here::here("data_processed", "tracts_final.gpkg"), "tracts_final")
 readr::write_csv(accessibility_summary, here::here("outputs", "tables", "accessibility_summary.csv"))

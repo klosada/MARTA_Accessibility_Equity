@@ -2,26 +2,27 @@
 # MARTA Accessibility and Equity Analysis
 # Code sample - Katherine Losada
 #
-# Measures how well MARTA rail only vs. bus + rail connects Atlanta census tracts
-# to 7 key destinations (job centers, universities, hospitals, airport) during the
+# Measures how well MARTA rail only vs. multimodal (bus + rail) connects Atlanta census tracts
+# to 10 key destinations (job centers, universities, hospitals, airport) during the
 # weekday morning peak, and whether access gaps fall on higher-need neighborhoods.
+# Travel time is the median door-to-door trip for riders leaving home every minute
+# from 7:00 to 8:00 AM, including the wait for the next scheduled bus or train.
 #
 # Full code: https://github.com/klosada/MARTA_Accessibility_Equity
 # Report: https://klosada.github.io/MARTA_Accessibility_Equity
 #
 # Excerpt from a 9-script R pipeline run by 99_run_all.R (01-04 prepare inputs):
 #   1. 00_utils.R helpers: choose_gtfs_analysis_date(), compute_network_links()
-#   2. 05_compute_accessibility.R: walk links and tidytransit::raptor() routing
-#   3. 06_summarize_metrics.R: destinations within 20/30/45 min, travel time stats
+#   2. 01_download_census.R: population-weighted tract centroid origins
+#   3. 05_compute_accessibility.R: walk links, stop transfers, tidytransit::raptor() routing
+#   4. 06_summarize_metrics.R: destinations within 15-90 min, travel time stats, wait cost
 # ============================================================
 
 
 # ------------------------------------------------------------
 # Helper functions (from 00_utils.R)
 # ------------------------------------------------------------
-# Picks a representative weekday GTFS service date with no calendar exceptions, so the 
-# analysis reflects a standard weekday schedule rather than a holiday or reduced-service day.
-
+# Selects a representative weekday from the GTFS feed with no service exceptions.
 choose_gtfs_analysis_date <- function(gtfs, target_weekday = analysis_weekday) {
   if (!"calendar" %in% names(gtfs)) {
     stop("GTFS feed must include a calendar table.")
@@ -65,17 +66,14 @@ choose_gtfs_analysis_date <- function(gtfs, target_weekday = analysis_weekday) {
     active_ids <- union(setdiff(base_ids, removed_ids), added_ids)
 
     if (length(active_ids) && !length(added_ids) && !length(removed_ids)) {
-      return(dt)
+      return(as.Date(dt))
     }
   }
 
   stop(glue("No regular {target_weekday} date found in GTFS feed without calendar exceptions."))
 }
 
-# Calculates walking distance between spatial features (census tract centroids to nearby
-# transit stops) using the OpenStreetMap pedestrian network and a shortest-path algorithm, 
-# retaining only connections within the 800-meter maximum walkable distance threshold.
-
+# Shortest network walk from each feature to nearby stops, kept within max_dist.
 compute_network_links <- function(network, from_sf, to_sf, from_cols, to_cols, max_dist) {
   candidate_rows <- sf::st_is_within_distance(from_sf, to_sf, dist = max_dist * 2)
 
@@ -91,7 +89,8 @@ compute_network_links <- function(network, from_sf, to_sf, from_cols, to_cols, m
       weights = "weight"
     )
 
-    keep_idx <- which(net_dists[1, ] <= max_dist)
+    walk_dists <- as.numeric(net_dists[1, ])
+    keep_idx <- which(walk_dists <= max_dist)
     if (!length(keep_idx)) {
       return(tibble())
     }
@@ -99,7 +98,7 @@ compute_network_links <- function(network, from_sf, to_sf, from_cols, to_cols, m
     tibble(
       row_id = from_row,
       stop_row = to_rows[keep_idx],
-      walk_dist_m = as.numeric(net_dists[1, keep_idx]),
+      walk_dist_m = walk_dists[keep_idx],
       walk_time_min = walk_dist_m / walk_speed_m_per_min
     ) %>%
       mutate(
@@ -109,6 +108,36 @@ compute_network_links <- function(network, from_sf, to_sf, from_cols, to_cols, m
       tidyr::unnest(c(from_data, to_data))
   })
 }
+
+
+# ------------------------------------------------------------
+# 01_download_census.R (excerpt)
+# Population-weighted tract centroid origins
+# ------------------------------------------------------------
+# tracts_acs is the ACS tract layer downloaded earlier in 01, limited to tracts
+# inside the 2020 Census City of Atlanta boundary.
+# Origins: 2020 Census population-weighted tract centroids (Centers of Population,
+# www2.census.gov/geo/docs/reference/cenpop2020/tract/), or an interior point
+# when the centroid falls outside its tract.
+cenpop_path <- list.files(dirs$raw_census, pattern = "^CenPop2020_Mean_TR13\\.txt$", full.names = TRUE)
+if (!length(cenpop_path)) {
+  stop("CenPop2020_Mean_TR13.txt not found in data_raw/census.")
+}
+
+cenpop <- readr::read_csv(cenpop_path[[1]], col_types = "cccddd") %>%
+  rename(STATEFP = 1) %>%
+  transmute(GEOID = paste0(STATEFP, COUNTYFP, TRACTCE), LATITUDE, LONGITUDE) %>%
+  st_as_sf(coords = c("LONGITUDE", "LATITUDE"), crs = 4269) %>%
+  st_transform(study_crs)
+
+tract_geoms <- st_geometry(tracts_acs)
+origin_points <- st_geometry(cenpop)[match(tracts_acs$GEOID, cenpop$GEOID)]
+point_inside <- diag(st_intersects(origin_points, tract_geoms, sparse = FALSE))
+origin_points[!point_inside] <- st_point_on_surface(tract_geoms[!point_inside])
+
+origins <- tracts_acs %>%
+  st_set_geometry(origin_points) %>%
+  select(GEOID, NAME, hhinc, pct_minority, pct_zero_vehicle)
 
 
 # ------------------------------------------------------------
@@ -126,8 +155,7 @@ stop_times_rail <- readRDS(here::here("data_processed", "stop_times_rail.rds"))
 walk_net <- readRDS(here::here("data_processed", "walk_net.rds"))
 partial_path <- here::here("data_processed", "travel_times_long_partial.rds")
 
-# Computes walk time from each POI, policy-relevant destination, to its nearest transit stops, 
-# providing the final walking segment needed for full travel time estimates.
+# Walk links from each destination to nearby stops (the final walk leg).
 build_destination_lookup <- function(destinations_sf, stops_sf, scenario_name) {
   compute_network_links(
     network = walk_net,
@@ -154,6 +182,7 @@ destination_stop_lookup <- bind_rows(
   build_destination_lookup(destinations, all_stops, "bus_rail")
 )
 
+# Walk links from each tract origin to nearby stops.
 compute_origin_stop_links <- function(origins_sf, stops_sf) {
   compute_network_links(
     network = walk_net,
@@ -174,8 +203,76 @@ origin_links <- bind_rows(
 save_rds(destination_stop_lookup, here::here("data_processed", "destination_stop_lookup.rds"))
 save_rds(origin_links, here::here("data_processed", "origin_stop_lookup.rds"))
 
-# Computes the fastest scheduled transit trip from each tract's walkable stops to every destination, 
-# adding walk time at both the start and end of the trip for a complete travel time estimate.
+# Builds walking transfers between nearby stops, since the MARTA feed has no
+# transfers.txt. Transfer time is the network walk time, at least 2 minutes.
+build_stop_transfers <- function(stops_sf) {
+  study_area <- readRDS(here::here("data_processed", "tracts_acs.rds")) %>%
+    st_union() %>%
+    st_buffer(3000)
+  stops_in_area <- stops_sf[lengths(st_intersects(stops_sf, study_area)) > 0, ]
+
+  walk_m <- sfnetworks::st_network_cost(walk_net, from = stops_in_area, to = stops_in_area, weights = "weight")
+  pairs <- which(walk_m <= max_transfer_walk_meters, arr.ind = TRUE)
+
+  tibble(
+    from_stop_id = stops_in_area$stop_id[pairs[, 1]],
+    to_stop_id = stops_in_area$stop_id[pairs[, 2]],
+    walk_dist_m = as.numeric(walk_m[pairs])
+  ) %>%
+    filter(from_stop_id != to_stop_id) %>%
+    transmute(
+      from_stop_id,
+      to_stop_id,
+      transfer_type = 2L,
+      min_transfer_time = pmax(min_transfer_seconds, round(walk_dist_m / walk_speed_m_per_min * 60))
+    )
+}
+
+message("Building stop-to-stop walking transfers...")
+stop_transfers <- build_stop_transfers(all_stops)
+attr(stop_times_full, "transfers") <- stop_transfers
+attr(stop_times_rail, "transfers") <- stop_transfers %>%
+  filter(from_stop_id %in% rail_stops$stop_id, to_stop_id %in% rail_stops$stop_id)
+save_rds(stop_transfers, here::here("data_processed", "stop_transfers.rds"))
+
+# Scheduled departure and arrival times at each stop. Transfer walks are only
+# used between two rides, so a trip must board and alight on a scheduled
+# vehicle; walks to and from stops stay within the 800 m limit.
+scheduled_keys <- function(stop_times_obj, time_col) {
+  paste(stop_times_obj$stop_id, as.numeric(stop_times_obj[[time_col]]))
+}
+for (scenario_st in c("stop_times_full", "stop_times_rail")) {
+  st_obj <- get(scenario_st)
+  attr(st_obj, "scheduled_departures") <- unique(scheduled_keys(st_obj, "departure_time"))
+  attr(st_obj, "scheduled_arrivals") <- unique(scheduled_keys(st_obj, "arrival_time"))
+  assign(scenario_st, st_obj)
+}
+
+# Home departure times, one per minute across the departure window.
+start_times <- seq(
+  as.numeric(hms::as_hms(departure_start)),
+  as.numeric(hms::as_hms(departure_end)),
+  by = 60
+)
+# Transit departures run until the last rider (leaving at 8:00) reaches a stop.
+raptor_time_range <- c(departure_start, format(hms::as_hms(max(start_times) + max_walk_meters / walk_speed_m_per_min * 60)))
+
+# Door-to-door time for each home departure time: walk to the stop, wait for
+# the next scheduled departure, ride, and walk to the destination. Uses the
+# earliest arrival among trips the rider can still catch.
+door_to_door_by_start <- function(leave_by, arrive) {
+  ord <- order(leave_by)
+  leave_by <- leave_by[ord]
+  best_arrival <- rev(cummin(rev(arrive[ord])))
+  next_trip <- findInterval(start_times, leave_by, left.open = TRUE) + 1
+  tt <- rep(Inf, length(start_times))
+  catchable <- next_trip <= length(leave_by)
+  tt[catchable] <- (best_arrival[next_trip[catchable]] - start_times[catchable]) / 60
+  tt
+}
+
+# Median door-to-door travel time from one tract to every destination across
+# home departure times. Trips over the 2-hour cap count as unreachable.
 calculate_origin_access <- function(origin_geoid, scenario_name, origin_link_tbl, stop_times_obj, dest_lookup_tbl) {
   candidate_stops <- origin_link_tbl %>%
     filter(GEOID == origin_geoid, scenario == scenario_name)
@@ -190,41 +287,70 @@ calculate_origin_access <- function(origin_geoid, scenario_name, origin_link_tbl
         dest_name,
         dest_type,
         travel_time_min = NA_real_,
+        best_time_min = NA_real_,
         reachable = FALSE
       ))
   }
+
+  dest_links <- dest_lookup_tbl %>%
+    filter(scenario == scenario_name)
 
   raptor_res <- tidytransit::raptor(
     stop_times = stop_times_obj,
     transfers = attr(stop_times_obj, "transfers"),
     stop_ids = candidate_stops$stop_id,
-    time_range = peak_time_range,
+    time_range = raptor_time_range,
     max_transfers = max_transfers,
     keep = "all"
-  ) %>%
-    as_tibble() %>%
-    left_join(candidate_stops %>% select(stop_id, walk_time_min), by = c("from_stop_id" = "stop_id")) %>%
-    mutate(total_time_min = seconds_to_minutes(travel_time) + walk_time_min)
+  )
 
-  dest_summary <- dest_lookup_tbl %>%
-    filter(scenario == scenario_name) %>%
-    left_join(
-      raptor_res,
-      by = c("dest_stop_id" = "to_stop_id")
-    ) %>%
-    mutate(total_time_min = total_time_min + dest_walk_time_min) %>%
-    group_by(dest_id, dest_name, dest_type) %>%
-    summarise(
-      travel_time_min = suppressWarnings(min(total_time_min, na.rm = TRUE)),
-      .groups = "drop"
+  # Keeps every scheduled journey that ends at a destination stop.
+  journeys <- raptor_res[raptor_res$to_stop_id %in% dest_links$dest_stop_id, ] %>%
+    as_tibble() %>%
+    inner_join(candidate_stops %>% select(stop_id, walk_time_min), by = c("from_stop_id" = "stop_id")) %>%
+    inner_join(
+      dest_links %>% select(dest_id, dest_stop_id, dest_walk_time_min),
+      by = c("to_stop_id" = "dest_stop_id"),
+      relationship = "many-to-many"
     ) %>%
     mutate(
-      travel_time_min = if_else(is.infinite(travel_time_min), NA_real_, travel_time_min),
+      leave_by = journey_departure_time - walk_time_min * 60,
+      arrive = journey_arrival_time + dest_walk_time_min * 60
+    )
+
+  # Destinations sharing a stop with the tract can be reached on foot at any time.
+  walk_only <- journeys %>%
+    filter(from_stop_id == to_stop_id) %>%
+    group_by(dest_id) %>%
+    summarise(walk_only_min = suppressWarnings(min(walk_time_min + dest_walk_time_min)), .groups = "drop")
+
+  dest_summary <- journeys %>%
+    filter(
+      from_stop_id != to_stop_id,
+      paste(from_stop_id, journey_departure_time) %in% attr(stop_times_obj, "scheduled_departures"),
+      paste(to_stop_id, journey_arrival_time) %in% attr(stop_times_obj, "scheduled_arrivals")
+    ) %>%
+    group_by(dest_id) %>%
+    summarise(tt = list(door_to_door_by_start(leave_by, arrive)), .groups = "drop") %>%
+    full_join(walk_only, by = "dest_id") %>%
+    mutate(
+      tt = purrr::map2(tt, walk_only_min, function(tt, walk_min) {
+        if (is.null(tt)) tt <- rep(Inf, length(start_times))
+        if (!is.na(walk_min)) tt <- pmin(tt, walk_min)
+        tt[tt > max_trip_minutes] <- Inf
+        tt
+      }),
+      travel_time_min = purrr::map_dbl(tt, median),
+      best_time_min = purrr::map_dbl(tt, min),
+      across(c(travel_time_min, best_time_min), ~ if_else(is.infinite(.x), NA_real_, .x))
+    ) %>%
+    left_join(dest_links %>% distinct(dest_id, dest_name, dest_type), by = "dest_id") %>%
+    mutate(
       GEOID = origin_geoid,
       scenario = scenario_name,
       reachable = !is.na(travel_time_min)
     ) %>%
-    select(GEOID, scenario, dest_id, dest_name, dest_type, travel_time_min, reachable)
+    select(GEOID, scenario, dest_id, dest_name, dest_type, travel_time_min, best_time_min, reachable)
 
   destinations %>%
     st_drop_geometry() %>%
@@ -235,10 +361,10 @@ calculate_origin_access <- function(origin_geoid, scenario_name, origin_link_tbl
       scenario = scenario_name,
       reachable = replace_na(reachable, FALSE)
     ) %>%
-    select(GEOID, scenario, dest_id, dest_name, dest_type, travel_time_min, reachable)
+    select(GEOID, scenario, dest_id, dest_name, dest_type, travel_time_min, best_time_min, reachable)
 }
 
-# Saves progress every 25 tracts so interrupted runs can resume from the last checkpoint.
+# Saves progress every 25 tracts so an interrupted run can resume.
 start_index <- 1L
 results_list <- vector("list", length(origins$GEOID))
 
@@ -276,6 +402,7 @@ for (i in seq.int(start_index, length(origins$GEOID))) {
 
 travel_times_long <- bind_rows(results_list)
 save_rds(travel_times_long, here::here("data_processed", "travel_times_long.rds"))
+unlink(partial_path)  # the next run starts fresh
 readr::write_csv(travel_times_long, here::here("outputs", "tables", "travel_times_long.csv"))
 
 
@@ -284,25 +411,35 @@ readr::write_csv(travel_times_long, here::here("outputs", "tables", "travel_time
 # Aggregating raw travel times into tract-level metrics
 # ------------------------------------------------------------
 
-tracts_acs <- readRDS(here::here("data_processed", "tracts_acs.rds"))
-travel_times_long <- readRDS(here::here("data_processed", "travel_times_long.rds"))
+# Excludes tracts with no residents (airport, golf course) from the analysis.
+tracts_acs <- readRDS(here::here("data_processed", "tracts_acs.rds")) %>%
+  filter(total_pop > 0)
+travel_times_long <- readRDS(here::here("data_processed", "travel_times_long.rds")) %>%
+  filter(GEOID %in% tracts_acs$GEOID)
 
-# Summarizing outputs by tract and scenario: mean/min/max travel time, plus cumulative counts
-# of destinations reachable within 20, 30, and 45 minutes to measure accessibility.
+# Per tract and scenario: min/median/mean/max travel time to reachable destinations,
+# destinations reachable within 15-90 min, and wait cost (median minus best-departure
+# travel time, averaged across destinations).
 accessibility_summary <- travel_times_long %>%
   group_by(GEOID, scenario) %>%
   summarise(
+    min_tt = suppressWarnings(min(travel_time_min, na.rm = TRUE)),
+    median_tt = median(travel_time_min, na.rm = TRUE),
     mean_tt = mean(travel_time_min, na.rm = TRUE),
-    min_tt = min(travel_time_min, na.rm = TRUE),
-    max_tt = max(travel_time_min, na.rm = TRUE),
-    n_20 = sum(travel_time_min <= 20, na.rm = TRUE),
+    max_tt = suppressWarnings(max(travel_time_min, na.rm = TRUE)),
+    n_reachable = sum(reachable),
+    wait_cost = mean(travel_time_min - best_time_min, na.rm = TRUE),
+    n_15 = sum(travel_time_min <= 15, na.rm = TRUE),
     n_30 = sum(travel_time_min <= 30, na.rm = TRUE),
     n_45 = sum(travel_time_min <= 45, na.rm = TRUE),
+    n_60 = sum(travel_time_min <= 60, na.rm = TRUE),
+    n_75 = sum(travel_time_min <= 75, na.rm = TRUE),
+    n_90 = sum(travel_time_min <= 90, na.rm = TRUE),
     .groups = "drop"
   ) %>%
-  mutate(across(c(mean_tt, min_tt, max_tt), ~ if_else(is.infinite(.x), NA_real_, .x)))
+  mutate(across(c(min_tt, median_tt, mean_tt, max_tt, wait_cost), ~ if_else(is.infinite(.x) | is.nan(.x), NA_real_, .x)))
 
-# Travel times to each individual destination, for destination-specific maps.
+# Travel time to each destination, for destination maps.
 travel_time_wide <- travel_times_long %>%
   select(GEOID, scenario, dest_name, travel_time_min) %>%
   mutate(dest_name = stringr::str_replace_all(tolower(dest_name), "[^a-z0-9]+", "_")) %>%
@@ -312,25 +449,21 @@ travel_time_wide <- travel_times_long %>%
     names_glue = "{scenario}_{dest_name}_tt"
   )
 
-# Scenario-level summaries side by side and computes the rail-only vs. bus+rail differences.
+# One row per tract, with the rail-only vs. multimodal difference at 45 min.
 summary_wide <- accessibility_summary %>%
   tidyr::pivot_wider(
     names_from = scenario,
-    values_from = c(mean_tt, min_tt, max_tt, n_20, n_30, n_45),
+    values_from = c(min_tt, median_tt, mean_tt, max_tt, n_reachable, wait_cost, n_15, n_30, n_45, n_60, n_75, n_90),
     names_glue = "{scenario}_{.value}"
   ) %>%
   mutate(
-    diff_n_20 = bus_rail_n_20 - rail_only_n_20,
-    diff_mean_tt = rail_only_mean_tt - bus_rail_mean_tt
+    diff_n_45 = bus_rail_n_45 - rail_only_n_45
   )
 
-# Joins accessibility metrics back onto tract geometry and ACS demographics, 
-# making outputs ready for the equity maps/plots and final report.
 tracts_final <- tracts_acs %>%
   left_join(summary_wide, by = "GEOID") %>%
   left_join(travel_time_wide, by = "GEOID")
 
 save_rds(accessibility_summary, here::here("data_processed", "accessibility_summary.rds"))
 save_rds(tracts_final, here::here("data_processed", "tracts_final.rds"))
-write_gpkg(tracts_final, here::here("data_processed", "tracts_final.gpkg"), "tracts_final")
 readr::write_csv(accessibility_summary, here::here("outputs", "tables", "accessibility_summary.csv"))

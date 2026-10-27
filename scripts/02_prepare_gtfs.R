@@ -1,8 +1,8 @@
 source(here::here("scripts", "00_utils.R"))
 ensure_directories()
 
-# Reads MARTA GTFS feed, filters to bus and rail routes (route_type 1 and 3),
-# and prepares stop times for two transit scenarios: rail only and bus + rail.
+# Reads the MARTA GTFS feed and prepares weekday stop times for two scenarios:
+# rail only (route_type 1) and multimodal (bus + rail, route_types 1 and 3).
 
 gtfs_path <- find_gtfs_zip()
 gtfs_full <- tidytransit::read_gtfs(gtfs_path) %>%
@@ -45,13 +45,10 @@ stop_times_rail <- tidytransit::filter_stop_times(
 )
 
 save_rds(gtfs_bus_rail, here::here("data_processed", "gtfs_full.rds"))
-save_rds(gtfs_rail, here::here("data_processed", "gtfs_rail.rds"))
 save_rds(stop_times_full, here::here("data_processed", "stop_times_full.rds"))
 save_rds(stop_times_rail, here::here("data_processed", "stop_times_rail.rds"))
 save_rds(all_stops, here::here("data_processed", "all_stops.rds"))
 save_rds(rail_stops, here::here("data_processed", "rail_stops.rds"))
-save_rds(all_routes, here::here("data_processed", "all_routes.rds"))
-save_rds(rail_routes, here::here("data_processed", "rail_routes.rds"))
 save_rds(
   tibble(analysis_date = analysis_date, weekday = analysis_weekday, peak_start = peak_start, peak_end = peak_end),
   here::here("data_processed", "analysis_window.rds")

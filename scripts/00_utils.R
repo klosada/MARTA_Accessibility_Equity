@@ -13,26 +13,6 @@ save_rds <- function(x, path) {
   invisible(path)
 }
 
-# Saves an sf object to a GeoPackage layer (for external GIS use).
-write_gpkg <- function(x, path, layer) {
-  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
-  suppressWarnings(sf::st_write(x, path, layer = layer, delete_layer = TRUE, quiet = TRUE))
-  invisible(path)
-}
-
-# Converts seconds to minutes.
-seconds_to_minutes <- function(x) {
-  x / 60
-}
-
-# Converts weekdays to numeric index for accurate chronological order in analysis and visuals.
-weekday_index <- function(x) {
-  c(
-    monday = 1L, tuesday = 2L, wednesday = 3L, thursday = 4L,
-    friday = 5L, saturday = 6L, sunday = 7L
-  )[[tolower(x)]]
-}
-
 # Selects a representative weekday from the GTFS feed with no service exceptions.
 choose_gtfs_analysis_date <- function(gtfs, target_weekday = analysis_weekday) {
   if (!"calendar" %in% names(gtfs)) {
@@ -77,7 +57,7 @@ choose_gtfs_analysis_date <- function(gtfs, target_weekday = analysis_weekday) {
     active_ids <- union(setdiff(base_ids, removed_ids), added_ids)
 
     if (length(active_ids) && !length(added_ids) && !length(removed_ids)) {
-      return(dt)
+      return(as.Date(dt))
     }
   }
 
@@ -101,10 +81,7 @@ build_stops_sf <- function(stops_tbl, crs = study_crs) {
     st_transform(crs)
 }
 
-# Calculates walking distance between spatial features (census tract centroids
-# to nearby transit stops) using the OpenStreetMap pedestrian network and a
-# shortest-path algorithm, retaining only connections within the 800-meter
-# maximum walkable distance threshold.
+# Shortest network walk from each feature to nearby stops, kept within max_dist.
 compute_network_links <- function(network, from_sf, to_sf, from_cols, to_cols, max_dist) {
   candidate_rows <- sf::st_is_within_distance(from_sf, to_sf, dist = max_dist * 2)
 
@@ -120,7 +97,8 @@ compute_network_links <- function(network, from_sf, to_sf, from_cols, to_cols, m
       weights = "weight"
     )
 
-    keep_idx <- which(net_dists[1, ] <= max_dist)
+    walk_dists <- as.numeric(net_dists[1, ])
+    keep_idx <- which(walk_dists <= max_dist)
     if (!length(keep_idx)) {
       return(tibble())
     }
@@ -128,7 +106,7 @@ compute_network_links <- function(network, from_sf, to_sf, from_cols, to_cols, m
     tibble(
       row_id = from_row,
       stop_row = to_rows[keep_idx],
-      walk_dist_m = as.numeric(net_dists[1, keep_idx]),
+      walk_dist_m = walk_dists[keep_idx],
       walk_time_min = walk_dist_m / walk_speed_m_per_min
     ) %>%
       mutate(
@@ -137,9 +115,4 @@ compute_network_links <- function(network, from_sf, to_sf, from_cols, to_cols, m
       ) %>%
       tidyr::unnest(c(from_data, to_data))
   })
-}
-
-# Adds a quartile column to a data frame. Used to group ACS data into quartiles for equity analysis.
-add_quartile <- function(x, n = 4) {
-  dplyr::ntile(x, n)
 }
