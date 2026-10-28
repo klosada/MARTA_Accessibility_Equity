@@ -123,20 +123,24 @@ raptor_time_range <- c(departure_start, format(hms::as_hms(max(start_times) + ma
 
 # Door-to-door time for each home departure time: walk to the stop, wait for
 # the next scheduled departure, ride, and walk to the destination. Uses the
-# earliest arrival among trips the rider can still catch.
-door_to_door_by_start <- function(leave_by, arrive) {
+# earliest arrival among trips the rider can still catch (fewer transfers on
+# ties), and counts the transfers on that trip.
+door_to_door_by_start <- function(leave_by, arrive, transfers) {
   ord <- order(leave_by)
-  leave_by <- leave_by[ord]
-  best_arrival <- rev(cummin(rev(arrive[ord])))
-  next_trip <- findInterval(start_times, leave_by, left.open = TRUE) + 1
+  by_arrival <- order(arrive, transfers)
+  arrival_rank <- match(seq_along(arrive), by_arrival)
+  best_trip <- by_arrival[rev(cummin(rev(arrival_rank[ord])))]
+  next_trip <- findInterval(start_times, leave_by[ord], left.open = TRUE) + 1
   tt <- rep(Inf, length(start_times))
-  catchable <- next_trip <= length(leave_by)
-  tt[catchable] <- (best_arrival[next_trip[catchable]] - start_times[catchable]) / 60
-  tt
+  n_transfers <- rep(NA_real_, length(start_times))
+  catchable <- next_trip <= length(ord)
+  tt[catchable] <- (arrive[best_trip[next_trip[catchable]]] - start_times[catchable]) / 60
+  n_transfers[catchable] <- transfers[best_trip[next_trip[catchable]]]
+  list(tt = tt, transfers = n_transfers)
 }
 
-# Median door-to-door travel time from one tract to every destination across
-# home departure times. Trips over the 2-hour cap count as unreachable.
+# Median door-to-door travel time and transfers from one tract to every
+# destination across home departure times. Trips over the 2-hour cap count as unreachable.
 calculate_origin_access <- function(origin_geoid, scenario_name, origin_link_tbl, stop_times_obj, dest_lookup_tbl) {
   candidate_stops <- origin_link_tbl %>%
     filter(GEOID == origin_geoid, scenario == scenario_name)
@@ -152,6 +156,7 @@ calculate_origin_access <- function(origin_geoid, scenario_name, origin_link_tbl
         dest_type,
         travel_time_min = NA_real_,
         best_time_min = NA_real_,
+        transfers = NA_real_,
         reachable = FALSE
       ))
   }
@@ -195,18 +200,27 @@ calculate_origin_access <- function(origin_geoid, scenario_name, origin_link_tbl
       paste(to_stop_id, journey_arrival_time) %in% attr(stop_times_obj, "scheduled_arrivals")
     ) %>%
     group_by(dest_id) %>%
-    summarise(tt = list(door_to_door_by_start(leave_by, arrive)), .groups = "drop") %>%
+    summarise(trips = list(door_to_door_by_start(leave_by, arrive, transfers)), .groups = "drop") %>%
     full_join(walk_only, by = "dest_id") %>%
     mutate(
-      tt = purrr::map2(tt, walk_only_min, function(tt, walk_min) {
-        if (is.null(tt)) tt <- rep(Inf, length(start_times))
-        if (!is.na(walk_min)) tt <- pmin(tt, walk_min)
-        tt[tt > max_trip_minutes] <- Inf
-        tt
+      trips = purrr::map2(trips, walk_only_min, function(trips, walk_min) {
+        if (is.null(trips)) trips <- list(tt = rep(Inf, length(start_times)), transfers = rep(NA_real_, length(start_times)))
+        if (!is.na(walk_min)) {
+          walk_faster <- walk_min <= trips$tt
+          trips$tt[walk_faster] <- walk_min
+          trips$transfers[walk_faster] <- 0
+        }
+        over_cap <- trips$tt > max_trip_minutes
+        trips$tt[over_cap] <- Inf
+        trips$transfers[over_cap] <- NA_real_
+        trips
       }),
-      travel_time_min = purrr::map_dbl(tt, median),
-      best_time_min = purrr::map_dbl(tt, min),
-      across(c(travel_time_min, best_time_min), ~ if_else(is.infinite(.x), NA_real_, .x))
+      travel_time_min = purrr::map_dbl(trips, ~ median(.x$tt)),
+      best_time_min = purrr::map_dbl(trips, ~ min(.x$tt)),
+      # Median transfers across the departures with a trip under the cap.
+      transfers = purrr::map_dbl(trips, ~ median(.x$transfers, na.rm = TRUE)),
+      across(c(travel_time_min, best_time_min), ~ if_else(is.infinite(.x), NA_real_, .x)),
+      transfers = if_else(is.na(travel_time_min), NA_real_, transfers)
     ) %>%
     left_join(dest_links %>% distinct(dest_id, dest_name, dest_type), by = "dest_id") %>%
     mutate(
@@ -214,7 +228,7 @@ calculate_origin_access <- function(origin_geoid, scenario_name, origin_link_tbl
       scenario = scenario_name,
       reachable = !is.na(travel_time_min)
     ) %>%
-    select(GEOID, scenario, dest_id, dest_name, dest_type, travel_time_min, best_time_min, reachable)
+    select(GEOID, scenario, dest_id, dest_name, dest_type, travel_time_min, best_time_min, transfers, reachable)
 
   destinations %>%
     st_drop_geometry() %>%
@@ -225,7 +239,7 @@ calculate_origin_access <- function(origin_geoid, scenario_name, origin_link_tbl
       scenario = scenario_name,
       reachable = replace_na(reachable, FALSE)
     ) %>%
-    select(GEOID, scenario, dest_id, dest_name, dest_type, travel_time_min, best_time_min, reachable)
+    select(GEOID, scenario, dest_id, dest_name, dest_type, travel_time_min, best_time_min, transfers, reachable)
 }
 
 # Saves progress every 25 tracts so an interrupted run can resume.

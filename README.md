@@ -32,7 +32,7 @@ Accessibility is measured as the number of destinations reachable from each cens
 4. MARTA's feed has no transfer table, so walking transfers are built between stops within a 400 m walk (walk time, at least 2 min).
 5. Scheduled trips are routed with `tidytransit::raptor()` for both scenarios, up to 3 transfers.
 6. For each home departure time, every minute from 7:00 to 8:00 AM: walk to stop + wait for the next departure + transit + walk to destination, capped at 2 hours. Travel time is the median across departures.
-7. Results are summarized into tract-level metrics (destinations within 15–90 min, min, median, mean, and max travel time, and wait cost) and joined to ACS demographics.
+7. Results are summarized into tract-level metrics (destinations within 15–90 min, min, median, mean, and max travel time, wait cost, and transfers) and joined to ACS demographics.
 8. Equity: tracts with no transit access and tracts with rail access are compared with all other tracts (Wilcoxon tests).
 
 ## Tech Stack

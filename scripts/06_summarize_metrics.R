@@ -10,8 +10,8 @@ travel_times_long <- readRDS(here::here("data_processed", "travel_times_long.rds
   filter(GEOID %in% tracts_acs$GEOID)
 
 # Per tract and scenario: min/median/mean/max travel time to reachable destinations,
-# destinations reachable within 15-90 min, and wait cost (median minus best-departure
-# travel time, averaged across destinations).
+# destinations reachable within 15-90 min, wait cost (median minus best-departure
+# travel time), and transfers per trip, both averaged across destinations.
 accessibility_summary <- travel_times_long %>%
   group_by(GEOID, scenario) %>%
   summarise(
@@ -21,6 +21,7 @@ accessibility_summary <- travel_times_long %>%
     max_tt = suppressWarnings(max(travel_time_min, na.rm = TRUE)),
     n_reachable = sum(reachable),
     wait_cost = mean(travel_time_min - best_time_min, na.rm = TRUE),
+    mean_transfers = mean(transfers, na.rm = TRUE),
     n_15 = sum(travel_time_min <= 15, na.rm = TRUE),
     n_30 = sum(travel_time_min <= 30, na.rm = TRUE),
     n_45 = sum(travel_time_min <= 45, na.rm = TRUE),
@@ -29,7 +30,7 @@ accessibility_summary <- travel_times_long %>%
     n_90 = sum(travel_time_min <= 90, na.rm = TRUE),
     .groups = "drop"
   ) %>%
-  mutate(across(c(min_tt, median_tt, mean_tt, max_tt, wait_cost), ~ if_else(is.infinite(.x) | is.nan(.x), NA_real_, .x)))
+  mutate(across(c(min_tt, median_tt, mean_tt, max_tt, wait_cost, mean_transfers), ~ if_else(is.infinite(.x) | is.nan(.x), NA_real_, .x)))
 
 # Travel time to each destination, for destination maps.
 travel_time_wide <- travel_times_long %>%
@@ -45,7 +46,7 @@ travel_time_wide <- travel_times_long %>%
 summary_wide <- accessibility_summary %>%
   tidyr::pivot_wider(
     names_from = scenario,
-    values_from = c(min_tt, median_tt, mean_tt, max_tt, n_reachable, wait_cost, n_15, n_30, n_45, n_60, n_75, n_90),
+    values_from = c(min_tt, median_tt, mean_tt, max_tt, n_reachable, wait_cost, mean_transfers, n_15, n_30, n_45, n_60, n_75, n_90),
     names_glue = "{scenario}_{.value}"
   ) %>%
   mutate(

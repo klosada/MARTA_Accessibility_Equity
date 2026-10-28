@@ -476,6 +476,9 @@ travel_time_bins <- c(0, 5, 10, 20, 30, 45, 60, 120)
 wait_cost_palette <- c("#e0ecf4", "#9ebcda", "#8856a7", "#6e016b")
 wait_cost_bins <- c(0, 10, 15, 20, 35)
 wait_cost_labels <- c("< 10", "10-15", "15-20", "20+")
+transfers_palette <- c("#e0ecf4", "#bfd3e6", "#9ebcda", "#8856a7", "#6e016b")
+transfers_bins <- c(0, 0.5, 1, 1.5, 2, 3.5)
+transfers_labels <- c("0-0.5", "0.5-1", "1-1.5", "1.5-2", "2-3")
 
 add_reference_destination_markers <- function(map_obj, data) {
   for (type_name in names(dest_pin_uris)) {
@@ -926,6 +929,44 @@ make_subset_box <- function(data, value_col, y_title, p_values, tick_prefix = ""
     )
 }
 
+# Scatter of one equity indicator against each tract's average multimodal
+# transfers, with a fitted line and the correlation above the points.
+make_transfer_scatter <- function(data, value_col, x_title, tick_prefix = "", tick_suffix = "") {
+  scatter_data <- data %>% filter(!is.na(.data[[value_col]]), !is.na(bus_rail_mean_transfers))
+  fit <- lm(reformulate(value_col, "bus_rail_mean_transfers"), data = scatter_data)
+  r_test <- cor.test(scatter_data[[value_col]], scatter_data$bus_rail_mean_transfers)
+  x_line <- range(scatter_data[[value_col]])
+  x_max <- if (tick_suffix == "%") 100 else max(x_line)
+  plot_ly(
+    data = scatter_data,
+    x = ~.data[[value_col]],
+    y = ~bus_rail_mean_transfers,
+    type = "scatter",
+    mode = "markers",
+    marker = list(color = "#f16913", opacity = 0.6, size = 6),
+    hovertext = ~glue("Tract: {NAME}<br>{x_title}: {tick_prefix}{format(round(.data[[value_col]]), big.mark = ',')}{tick_suffix}<br>Average transfers: {round(bus_rail_mean_transfers, 1)}"),
+    hoverinfo = "text",
+    showlegend = FALSE
+  ) %>%
+    add_lines(
+      x = x_line,
+      y = predict(fit, setNames(data.frame(x_line), value_col)),
+      inherit = FALSE,
+      line = list(color = "#7f2704", width = 2),
+      hoverinfo = "skip",
+      showlegend = FALSE
+    ) %>%
+    layout(
+      xaxis = list(title = x_title, tickprefix = tick_prefix, ticksuffix = tick_suffix, range = c(0, x_max * 1.05)),
+      yaxis = list(title = "Average transfers", range = c(0, 3.4)),
+      annotations = list(list(
+        x = x_max / 2, y = 3.1, xref = "x", yref = "y",
+        text = glue("r = {sprintf('%.2f', r_test$estimate)}, {format_p(r_test$p.value)}"),
+        showarrow = FALSE, yanchor = "bottom", font = list(size = 10)
+      ))
+    )
+}
+
 format_p <- function(p) ifelse(p < 0.001, "p < 0.001", ifelse(p < 0.01, sprintf("p = %.3f", p), sprintf("p = %.2f", p)))
 
 plotly_theme <- list(
@@ -958,6 +999,10 @@ a:hover, a:focus { color: #9a4724; }
   flex-wrap: wrap;
   gap: 12px;
   margin: 16px 0 24px;
+}
+.stat-tiles.grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
 }
 .stat-tile {
   flex: 1 1 200px;
@@ -1015,6 +1060,7 @@ a:hover, a:focus { color: #9a4724; }
 .paired-frame .reach-legend { position: absolute; right: 10px; bottom: 28px; z-index: 1001; }
 @media (max-width: 700px) {
   .paired-maps { flex-direction: column; }
+  .stat-tiles.grid-3 { grid-template-columns: 1fr; }
   .paired-frame .time-slider, .paired-frame .reach-legend { position: static; transform: none; margin: 8px auto; width: fit-content; }
 }
 .map-label { background: rgba(255,255,255,0.96); padding: 6px 10px; border-radius: 6px; border: 1px solid #d0d0d0; font-size: 13px; }
@@ -1058,6 +1104,7 @@ tracts_tbl <- tracts_final %>% st_drop_geometry()
 access_tracts <- tracts_tbl %>% filter(bus_rail_n_reachable > 0)
 pct_over_45 <- round(100 * mean(access_tracts$bus_rail_median_tt > 45))
 pct_over_60 <- round(100 * mean(access_tracts$bus_rail_median_tt > 60))
+pct_one_transfer <- round(100 * mean(access_tracts$bus_rail_mean_transfers >= 1))
 no_access_tracts <- tracts_tbl %>% filter(bus_rail_n_reachable == 0)
 n_no_access_high_income <- sum(no_access_tracts$hhinc > median(tracts_tbl$hhinc, na.rm = TRUE), na.rm = TRUE)
 most_car_free <- tracts_tbl %>% filter(ntile(pct_zero_vehicle, 4) == 4)
@@ -1131,7 +1178,7 @@ browsable(tagList(
 3. **Origins:** one population-weighted centroid per tract, where residents live.
 4. **Walk links:** shortest network walk of up to 800 m (0.5 mi, about 10 min) from each centroid to nearby stops, and from stops to each destination. Transfer walks between stops are up to 400 m and take at least 2 min.
 5. **Transit routing:** weekday rail-only and multimodal (bus + rail) schedules, for riders leaving home every minute from 7 to 8 AM and arriving by 10 AM, with up to 3 transfers and a 2-hour maximum trip.
-6. **Metrics:** each tract's median door-to-door time (walks, waits, and rides) to each destination, summarized as destinations reachable within each commute time, min, median, mean, and max commute, and wait cost.
+6. **Metrics:** each tract's median door-to-door time (walks, waits, and rides) to each destination, summarized as destinations reachable within each commute time, min, median, mean, and max commute, wait cost, and transfers.
 
 <details class="spaced">
 <summary>Code excerpt: walking network (<code>scripts/03_prepare_walking_network.R</code>)</summary>
@@ -1178,8 +1225,7 @@ raptor_res <- tidytransit::raptor(
   keep = "all"
 )
 
-# For each home departure minute, take the earliest arrival among
-# trips the rider can still catch after walking to the stop.
+# For each departure minute (7-8 AM), take the fastest trip from nearby stops.
 door_to_door_by_start <- function(leave_by, arrive) {
   ord <- order(leave_by)
   leave_by <- leave_by[ord]
@@ -1190,7 +1236,9 @@ door_to_door_by_start <- function(leave_by, arrive) {
   tt[catchable] <- (best_arrival[next_trip[catchable]] - start_times[catchable]) / 60
   tt
 }
-# Travel time = median over the 61 departure minutes (over 2 h = unreachable).
+
+# Travel time = median over the 61 departure minutes.
+travel_time_min <- median(door_to_door_by_start(leave_by, arrive))
 ```
 
 </details>
@@ -1402,19 +1450,19 @@ accessibility_summary %>%
   summarise(
     tracts_with_access = sum(n_reachable > 0),
     n_reachable = mean(n_reachable[n_reachable > 0]),
-    across(c(min_tt, median_tt, mean_tt, max_tt, wait_cost), ~ mean(.x, na.rm = TRUE)),
+    across(c(min_tt, median_tt, mean_tt, max_tt, wait_cost, mean_transfers), ~ mean(.x, na.rm = TRUE)),
     .groups = "drop"
   ) %>%
   mutate(
     scenario = recode(scenario, rail_only = "Rail only", bus_rail = "Multimodal"),
     scenario = factor(scenario, levels = c("Rail only", "Multimodal")),
     n_reachable = sprintf("%.1f of %d", n_reachable, n_destinations),
-    across(c(min_tt, median_tt, mean_tt, max_tt, wait_cost), ~ sprintf("%.1f", .x))
+    across(c(min_tt, median_tt, mean_tt, max_tt, wait_cost, mean_transfers), ~ sprintf("%.1f", .x))
   ) %>%
   arrange(scenario) %>%
   knitr::kable(
-    col.names = c("Scenario", "Tracts with access", "Reachable destinations", "Min commute (min)", "Median commute (min)", "Mean commute (min)", "Max commute (min)", "Wait cost (min)"),
-    align = c("l", "r", "r", "r", "r", "r", "r", "r")
+    col.names = c("Scenario", "Tracts with access", "Reachable destinations", "Min commute (min)", "Median commute (min)", "Mean commute (min)", "Max commute (min)", "Wait cost (min)", "Mean transfers"),
+    align = c("l", "r", "r", "r", "r", "r", "r", "r", "r")
   )
 ```
 
@@ -1464,6 +1512,21 @@ tagList(
     bins = wait_cost_bins,
     legend_title = "Minutes",
     legend_labels = wait_cost_labels
+  )
+)
+```
+
+```{r map-transfers}
+tagList(
+  tags$h4("Average transfers per trip on the multimodal network"),
+  make_leaflet_map(
+    tracts_leaflet,
+    "bus_rail_mean_transfers",
+    transfers_palette,
+    "Average transfers",
+    bins = transfers_bins,
+    legend_title = "Transfers",
+    legend_labels = transfers_labels
   )
 )
 ```
@@ -1532,14 +1595,35 @@ p-values compare each group with all other tracts (Wilcoxon test). Values below 
 
 Tracts with no transit access tend to be higher-income, with fewer car-free households than the city overall. Tracts with rail access look like the city as a whole.
 
+#### Average multimodal transfers by income, minority share, and car-free households
+
+```{r equity-transfers, fig.height = 4.5}
+transfer_tracts <- equity_base %>% filter(bus_rail_n_reachable > 0)
+subplot(
+  make_transfer_scatter(transfer_tracts, "hhinc", "Median household income", tick_prefix = "$"),
+  make_transfer_scatter(transfer_tracts, "pct_minority", "Percent minority", tick_suffix = "%"),
+  make_transfer_scatter(transfer_tracts, "pct_zero_vehicle", "Percent zero-vehicle households", tick_suffix = "%"),
+  nrows = 1,
+  margin = 0.06,
+  titleX = TRUE,
+  titleY = TRUE
+) %>%
+  layout(plotly_theme)
+```
+
+Each point is a tract with transit access. r shows how closely tracts follow the trend line (0 = no relationship, 1 = a perfect line), and p-values below 0.05 are significant.
+
+Tracts with a higher minority share need more transfers. Income and car-free households show no clear relationship.
+
 ## Key Findings
 
-<div class="stat-tiles">
-<div class="stat-tile"><div class="stat-value">`r round(bus_wait)` min</div><div class="stat-key">average wait cost on multimodal trips</div><div class="stat-desc">Rail averages `r round(rail_wait, 1)` min, since trains run more often.</div></div>
-<div class="stat-tile"><div class="stat-value">`r length(bus_dest_names)` of `r n_destinations`</div><div class="stat-key">destinations need a bus</div><div class="stat-desc">`r knitr::combine_words(bus_dest_names)`.</div></div>
-<div class="stat-tile"><div class="stat-value">`r pct_over_45`% of tracts</div><div class="stat-key">have a median multimodal commute over 45 min</div><div class="stat-desc">`r pct_over_60`% have one over an hour.</div></div>
+<div class="stat-tiles grid-3">
+<div class="stat-tile"><div class="stat-value">`r length(bus_dest_names)` of `r n_destinations` destinations</div><div class="stat-key">need a bus</div><div class="stat-desc">`r knitr::combine_words(bus_dest_names)`.</div></div>
+<div class="stat-tile"><div class="stat-value">45+ min commute</div><div class="stat-key">median for `r pct_over_45`% of tracts on the multimodal network</div><div class="stat-desc">`r pct_over_60`% of tracts have a median commute over an hour.</div></div>
 <div class="stat-tile"><div class="stat-value">`r n_no_stop` tracts</div><div class="stat-key">have no transit access</div><div class="stat-desc">No stop is within an 800 m walk of the tract's population-weighted centroid.</div></div>
-<div class="stat-tile"><div class="stat-value">`r n_no_access_high_income` of `r n_no_stop`</div><div class="stat-key">tracts with no access are above the city's median income</div><div class="stat-desc">MARTA coverage favors lower-income and car-free tracts. `r if (n_most_car_free_no_access == 0) "None" else n_most_car_free_no_access` of the `r nrow(most_car_free)` most car-free tracts lack access.</div></div>
+<div class="stat-tile"><div class="stat-value">`r round(bus_wait)` min wait</div><div class="stat-key">added to the average multimodal trip</div><div class="stat-desc">Rail averages `r round(rail_wait, 1)` min, since trains run more often.</div></div>
+<div class="stat-tile"><div class="stat-value">1+ transfer</div><div class="stat-key">needed on the average multimodal trip in `r pct_one_transfer`% of tracts</div><div class="stat-desc">Tracts with a higher minority share need more transfers.</div></div>
+<div class="stat-tile"><div class="stat-value">`r n_no_access_high_income` of `r n_no_stop` tracts</div><div class="stat-key">with no access are above the median income</div><div class="stat-desc">`r if (n_most_car_free_no_access == 0) "None" else n_most_car_free_no_access` of the `r nrow(most_car_free)` most car-free tracts lack access.</div></div>
 </div>
 
 Buses extend access from `r n_rail_tracts` to `r n_bus_tracts` tracts, but the typical multimodal trip takes `r round(bus_typical_tt)` min and about `r round(bus_wait)` of it is spent waiting. MARTA's stop coverage favors lower-income and car-free tracts, and the `r n_no_stop` tracts without a walkable stop are mostly higher-income. For most residents, the gap is service frequency and speed rather than coverage.
